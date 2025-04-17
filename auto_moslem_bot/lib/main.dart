@@ -88,6 +88,12 @@ class _LogScreenState extends State<LogScreen> {
   }
 
   Future<void> sendLogsToServer() async {
+    var headers = {
+      'X-API-Key': "a9ba6e3a-3179-44c3-a9ca-54bb641e9be3",
+      'Access-Control-Allow-Origin': '*',
+      'Content-Type': 'application/json',
+      'Accept': '*/*'
+    };
     final logBox = Hive.box('logs');
     final logData = logBox.values.cast<String>().toList();
 
@@ -98,8 +104,8 @@ class _LogScreenState extends State<LogScreen> {
     }
 
     final response = await http.post(
-      Uri.parse("http://<YOUR_FLASK_SERVER>/upload_logs"),
-      headers: {"Content-Type": "application/json"},
+      Uri.parse("https://bofandra.pythonanywhere.com/upload_logs"),
+      headers: headers,
       body: jsonEncode({
         "device_id": deviceId,
         "logs": logData,
@@ -110,6 +116,8 @@ class _LogScreenState extends State<LogScreen> {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text("Logs sent successfully")));
     } else {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Failed to send logs: ${response.body}")));
       print("Failed to send logs: ${response.body}");
     }
   }
@@ -140,7 +148,15 @@ class _LogScreenState extends State<LogScreen> {
             child: Text('Fetch Usage'),
           ),
           ElevatedButton(
-            onPressed: sendLogsToServer,
+            onPressed: logDate == null ? null : sendLogsToServer,
+            style: ButtonStyle(
+              backgroundColor: MaterialStateProperty.resolveWith<Color?>((states) {
+                if (states.contains(MaterialState.disabled)) {
+                  return Colors.grey;
+                }
+                return null; // Use the default
+              }),
+            ),
             child: Text('Send to Server'),
           ),
           Expanded(
