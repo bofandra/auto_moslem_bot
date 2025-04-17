@@ -34,6 +34,8 @@ class _LogScreenState extends State<LogScreen> {
   List<String> logs = [];
   String? deviceId;
   String? logDate;
+  DateTime? selectedDate;
+  bool isLoading = false;
   final AppUsage appUsage = AppUsage();
 
   @override
@@ -43,10 +45,12 @@ class _LogScreenState extends State<LogScreen> {
   }
 
   Future<void> getDeviceId() async {
+    setState(() => isLoading = true);
     final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
     final androidInfo = await deviceInfo.androidInfo;
     setState(() {
       deviceId = androidInfo.id;
+      setState(() => isLoading = false);
     });
   }
 
@@ -60,13 +64,12 @@ class _LogScreenState extends State<LogScreen> {
   }
 
   Future<void> fetchUsage() async {
-    await checkUsagePermission();
+    setState(() => isLoading = true);
     try {
-      // Fetch usage for the entire previous day (yesterday)
-      final now = DateTime.now();
-      final yesterday = DateTime(now.year, now.month, now.day).subtract(Duration(days: 1));
-      final startDate = yesterday;
-      final endDate = DateTime(now.year, now.month, now.day).subtract(Duration(seconds: 1));
+      // By default, fetch usage for the entire previous day (yesterday)
+      final now = selectedDate ?? DateTime.now().subtract(Duration(days: 1));
+      final startDate = DateTime(now.year, now.month, now.day);
+      final endDate = startDate.add(Duration(days: 1)).subtract(Duration(seconds: 1));
 
       List<AppUsageInfo> infoList =
           await appUsage.getAppUsage(startDate, endDate);
@@ -75,6 +78,7 @@ class _LogScreenState extends State<LogScreen> {
               '${info.packageName} used for ${info.usage.inMinutes} minutes on ${startDate.toIso8601String().split("T")[0]}')
           .toList();
       Box logBox = Hive.box('logs');
+      await logBox.clear();
       for (var log in newLogs) {
         logBox.add(log);
       }
@@ -83,13 +87,16 @@ class _LogScreenState extends State<LogScreen> {
         logDate = startDate.toIso8601String().split("T")[0];
       });
     } catch (e) {
+      await checkUsagePermission();
       print("Error: $e");
+    } finally {
+      setState(() => isLoading = false);
     }
   }
 
   Future<void> sendLogsToServer() async {
+    setState(() => isLoading = true);
     var headers = {
-      'X-API-Key': "a9ba6e3a-3179-44c3-a9ca-54bb641e9be3",
       'Access-Control-Allow-Origin': '*',
       'Content-Type': 'application/json',
       'Accept': '*/*'
@@ -120,55 +127,113 @@ class _LogScreenState extends State<LogScreen> {
           .showSnackBar(SnackBar(content: Text("Failed to send logs: ${response.body}")));
       print("Failed to send logs: ${response.body}");
     }
+    setState(() => isLoading = false);
   }
 
+  Future<void> _pickDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate ?? DateTime.now().subtract(Duration(days: 1)),
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null && picked != selectedDate) {
+      setState(() {
+        selectedDate = picked;
+      });
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
     final logBox = Hive.box('logs');
     logs = logBox.values.cast<String>().toList();
     return Scaffold(
       appBar: AppBar(title: Text('User Activity Logger')),
-      body: Column(
+      body: Stack(
         children: [
-          if (deviceId != null)
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Text('Device ID: $deviceId'),
-            ),
-          if (logDate != null)
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Text(
-                'Log Date: $logDate',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+          Column(
+            children: [
+              if (deviceId != null)
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Text('Device ID: $deviceId'),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                child: Row(
+                  children: [
+                    ElevatedButton(
+                      onPressed: () => _pickDate(context),
+                      child: Text('Pick Date'),
+                    ),
+                    SizedBox(width: 12),
+                    Text(
+                      selectedDate != null
+                          ? '${selectedDate!.toIso8601String().split("T")[0]}'
+                          : 'No date selected',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                    SizedBox(width: 12),
+                    ElevatedButton(
+                      onPressed: (isLoading || selectedDate == null) ? null : fetchUsage,
+                      style: ButtonStyle(
+                        backgroundColor: MaterialStateProperty.resolveWith<Color?>((states) {
+                          if (states.contains(MaterialState.disabled)) {
+                            return Colors.grey;
+                          }
+                          return null;
+                        }),
+                      ),
+                      child: Text('Fetch Usage'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ElevatedButton(
-            onPressed: fetchUsage,
-            child: Text('Fetch Usage'),
-          ),
-          ElevatedButton(
-            onPressed: logDate == null ? null : sendLogsToServer,
-            style: ButtonStyle(
-              backgroundColor: MaterialStateProperty.resolveWith<Color?>((states) {
-                if (states.contains(MaterialState.disabled)) {
-                  return Colors.grey;
-                }
-                return null; // Use the default
-              }),
-            ),
-            child: Text('Send to Server'),
-          ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: logs.length,
-              itemBuilder: (context, index) => ListTile(
-                title: Text(logs[index]),
+              Row(
+                  children: [
+                    if (logDate != null)
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(
+                          'Log Date: $logDate',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+                        ),
+                      ),
+                    ElevatedButton(
+                      onPressed: logDate == null ? null : sendLogsToServer,
+                      style: ButtonStyle(
+                        backgroundColor: MaterialStateProperty.resolveWith<Color?>((states) {
+                          if (states.contains(MaterialState.disabled)) {
+                            return Colors.grey;
+                          }
+                          return null; // Use the default
+                        }),
+                      ),
+                      child: Text('Send to Server'),
+                    ),
+                  ]
               ),
-            ),
+              SizedBox(height: 24),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: logs.length,
+                  itemBuilder: (context, index) => ListTile(
+                    title: Text(logs[index]),
+                  ),
+                ),
+              ),
+            if (isLoading)
+              Container(
+                color: Colors.black.withOpacity(0.5),
+                child: Center(
+                  child: CircularProgressIndicator(),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ]
+      )
     );
   }
 }
