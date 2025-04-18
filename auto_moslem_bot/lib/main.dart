@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'dart:io' show Platform;
 import 'package:android_intent_plus/android_intent.dart';
+import 'package:flutter/services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -119,15 +120,58 @@ class _LogScreenState extends State<LogScreen> {
         "log_date": logDate ?? "unknown"
       }),
     );
-    if (response.statusCode == 200) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Logs sent successfully")));
-    } else {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Failed to send logs: ${response.body}")));
-      print("Failed to send logs: ${response.body}");
+    try {
+      if (response.statusCode == 200) {
+            final Map<String, dynamic> jsonBody = jsonDecode(response.body);
+            final formattedResponse = jsonBody["response"]
+                .toString()
+                .replaceAll(r'\n', '\n')
+                .replaceAll(r'\"', '"')
+                .replaceAll(r'\:', ':')
+                .replaceAllMapped(RegExp(r'\\(.)'), (match) => match.group(1)!);
+
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text("Success"),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("$formattedResponse"),
+                    ]
+                  )
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: response.body));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Copied to clipboard")),
+                      );
+                    },
+                    child: Text("Copy to Clipboard"),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text("OK"),
+                  ),
+                ],
+              ),
+            );
+          /*if (response.statusCode == 200) {
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text("Logs sent successfully")));*/
+          } else {
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text("Failed to send logs: ${response.body}")));
+            print("Failed to send logs: ${response.body}");
+          }
+    } finally {
+      setState(() => isLoading = false);
     }
-    setState(() => isLoading = false);
+    
   }
 
   Future<void> _pickDate(BuildContext context) async {
@@ -142,6 +186,14 @@ class _LogScreenState extends State<LogScreen> {
         selectedDate = picked;
       });
     }
+  }
+
+  void _copyLogsToClipboard() {
+    final logText = logs.join("\n");
+    Clipboard.setData(ClipboardData(text: logText));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Logs copied to clipboard")),
+    );
   }
   
   @override
@@ -201,7 +253,7 @@ class _LogScreenState extends State<LogScreen> {
                         ),
                       ),
                     ElevatedButton(
-                      onPressed: logDate == null ? null : sendLogsToServer,
+                      onPressed: (isLoading || logDate == null ) ? null : sendLogsToServer,
                       style: ButtonStyle(
                         backgroundColor: MaterialStateProperty.resolveWith<Color?>((states) {
                           if (states.contains(MaterialState.disabled)) {
@@ -211,6 +263,10 @@ class _LogScreenState extends State<LogScreen> {
                         }),
                       ),
                       child: Text('Send to Server'),
+                    ),
+                    TextButton(
+                      onPressed: _copyLogsToClipboard,
+                      child: Text("Copy Logs"),
                     ),
                   ]
               ),
